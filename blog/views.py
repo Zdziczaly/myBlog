@@ -7,6 +7,7 @@ from django.core.mail import send_mail
 from django.http import HttpResponseRedirect
 from django.urls import reverse
 from taggit.models import Tag
+from django.db.models import Count
 
 
 def post_share(request, post_id):
@@ -35,10 +36,10 @@ class PostListView(ListView):
 
 def post_list(request, tag_slug=None):
     object_list = Post.published.all()
-    tag=None
+    tag = None
     if tag_slug:
-        tag=get_object_or_404(Tag, slug=tag_slug)
-        object_list=object_list.filter(tags__in=[tag])
+        tag = get_object_or_404(Tag, slug=tag_slug)
+        object_list = object_list.filter(tags__in=[tag])
     paginator = Paginator(object_list, 2)
     page = request.GET.get('page')
     try:
@@ -47,13 +48,16 @@ def post_list(request, tag_slug=None):
         posts = paginator.page(1)
     except EmptyPage:
         posts = paginator.page(paginator.num_pages)
-    return render(request, 'blog/post/list.html', {'posts': posts, 'page': page, 'tag':tag})
+    return render(request, 'blog/post/list.html', {'posts': posts, 'page': page, 'tag': tag})
 
 
 def post_detail(request, year, month, day, post, new_comment=None):
     post = get_object_or_404(Post, slug=post, status='published', publish__year=year, publish__month=month,
                              publish__day=day)
     comments = post.comments.filter(active=True)
+    post_tags_ids = post.tags.values_list('id', flat=True)
+    similar_posts = Post.published.filter(tags__in=post_tags_ids).exclude(id=post.id)
+    similar_posts = similar_posts.annotate(same_tags=Count('tags')).order_by('-same_tags', '-publish')[:4]
     if request.method == 'POST':
         comment_form = CommentForm(data=request.POST)
         if comment_form.is_valid():
@@ -63,4 +67,6 @@ def post_detail(request, year, month, day, post, new_comment=None):
             return HttpResponseRedirect(reverse('blog:post_detail', args=(year, month, day, post.slug)))
     else:
         comment_form = CommentForm()
-    return render(request, 'blog/post/detail.html', {'post': post, 'comments': comments, 'comment_form': comment_form, 'new_comment':new_comment})
+    return render(request, 'blog/post/detail.html',
+                  {'post': post, 'comments': comments, 'comment_form': comment_form, 'new_comment': new_comment,
+                   'similar_posts': similar_posts})
